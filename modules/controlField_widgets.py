@@ -4,19 +4,39 @@ from PIL import Image
 
 
 class controlField(CTkFrame):
-    def __init__(self, parent, retryMethod, downloadMethod):
+    def __init__(self, parent, retryMethod, downloadMethod, resizeWindowMethod):
         super().__init__(parent)
 
+        # Status Label
         self.status = statusLabel(self)
         self.status.pack(side="left", padx=(15, 0))
 
-        self.downloadBtn = greenBtn(parent=self, text="Download", method=downloadMethod)
+        # ResizeWindow Button
+        img = Image.open(EXTEND_ICON)
+        img = img.convert("RGBA")
+        ctk_img = CTkImage(light_image=img, dark_image=img, size=(17, 13))
+        self.resizeWindowBtn = resizeWindowButton(self, ctk_img, resizeWindowMethod)
+        self.resizeWindowBtn.place(relx=0.5, rely=0.5, anchor="center")
+
+        # Download Button
+        self.downloadBtn = CTkButton(
+            self,
+            text="Download",
+            fg_color=GREEN_BTN_FG,
+            hover_color=GREEN_BTN_FG_HOVER,
+            text_color="white",
+            font=BUTTON_FONT,
+            width=125,
+            height=33,
+            corner_radius=6,
+            command=downloadMethod,
+        )
         self.downloadBtn.pack(side="right")
 
+        # Retry Button
         img = Image.open(RETRY_ICON)
         img = img.convert("RGBA")
         ctk_img = CTkImage(light_image=img, dark_image=img, size=(25, 25))
-
         self.retry_label = CTkLabel(
             self,
             text="",
@@ -38,18 +58,20 @@ class statusLabel(CTkLabel):
         )
 
 
-class greenBtn(CTkButton):
-    def __init__(self, parent, text, method, image=None, witdh=125, height=33, cr=6):
+class resizeWindowButton(CTkButton):
+    def __init__(self, parent, ctk_img, resizeWindowMethod):
         super().__init__(
             parent,
-            text=text,
-            fg_color=GREEN_BTN_FG,
-            text_color="white",
-            font=BUTTON_FONT,
-            width=witdh,
-            height=height,
-            corner_radius=cr,
-            image=image,
-            hover_color=GREEN_BTN_FG_HOVER,
-            command=method,
+            text="",
+            image=ctk_img,
+            width=17,
+            height=13,
+            cursor="hand2",
+            command=resizeWindowMethod,
         )
+
+    def changeImage(self, imgPath):
+        img = Image.open(imgPath)
+        img = img.convert("RGBA")
+        ctk_img = CTkImage(light_image=img, dark_image=img, size=(17, 13))
+        self.configure(image=ctk_img)

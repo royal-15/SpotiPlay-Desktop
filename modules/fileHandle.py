@@ -1,12 +1,13 @@
 import os
 import sys
+import json
 import appdirs
 
 
 class DataWriter:
-    def __init__(self, filename="data.txt", showMessage=None):
+    def __init__(self, filename="data.json", showMessage=None):
         self.showMessage = showMessage
-        # If running as exe, use user's app data directory
+
         try:
             if getattr(sys, "frozen", False):
                 # Running as bundled exe
@@ -15,61 +16,66 @@ class DataWriter:
                 data_dir = appdirs.user_data_dir(app_name, app_author)
                 os.makedirs(data_dir, exist_ok=True)
                 self.filename = os.path.join(data_dir, filename)
-                # Create the file if it doesn't exist
-                if not os.path.exists(self.filename):
-                    with open(self.filename, "w", encoding="utf-8") as f:
-                        f.write("")  # Create empty file
-                print(f"Data file location: {self.filename}")
             else:
                 # Running as script
                 self.filename = filename
-                # Create the file if it doesn't exist
-                if not os.path.exists(self.filename):
-                    with open(self.filename, "w", encoding="utf-8") as f:
-                        f.write("")  # Create empty file
-                print(f"Data file location: {self.filename}")
+
+            # Initialize file if missing or empty
+            if not os.path.exists(self.filename) or os.stat(self.filename).st_size == 0:
+                self._write_data({"url": "", "path": ""})
+
+            print(f"Data file location: {self.filename}")
+
         except Exception as e:
             error_message = f"Error initializing data file: {str(e)}"
             if self.showMessage:
                 self.showMessage("Data File Error", error_message, "e")
 
-    def write_url(self, url):
-        """Writes the URL to the first line, keeping the path unchanged."""
-        try:
-            path = self.read_path()  # Read the existing path
-            with open(self.filename, "w", encoding="utf-8") as file:
-                file.write(url + "\n")  # Write the new URL
-                if path:
-                    file.write(path + "\n")  # Preserve the path
-        except Exception as e:
-            warning_message = f"Error writing URL: {str(e)}"
-            if self.showMessage:
-                self.showMessage("URL Save Error", warning_message, "w")
-            return False
-        return True
-
-    def write_path(self, path):
-        """Writes the path to the second line, keeping the URL unchanged."""
-        try:
-            url = self.read_url()  # Read the existing URL
-            with open(self.filename, "w", encoding="utf-8") as file:
-                if url:
-                    file.write(url + "\n")  # Preserve the URL
-                file.write(path + "\n")  # Write the new path
-        except Exception as e:
-            warning_message = f"Error writing path: {str(e)}"
-            if self.showMessage:
-                self.showMessage("Path Save Error", warning_message, "w")
-            return False
-        return True
-
-    def read_url(self):
-        """Reads the first line (URL) from the file."""
+    def _read_data(self):
+        """Internal: Read entire JSON object from file."""
         try:
             with open(self.filename, "r", encoding="utf-8") as file:
-                return file.readline().strip()  # Read first line
+                return json.load(file)
         except FileNotFoundError:
-            return ""
+            return {"url": "", "path": ""}
+        except json.JSONDecodeError:
+            return {"url": "", "path": ""}
+        except Exception as e:
+            warning_message = f"Error reading data: {str(e)}"
+            if self.showMessage:
+                self.showMessage("Read Error", warning_message, "w")
+            return {"url": "", "path": ""}
+
+    def _write_data(self, data):
+        """Internal: Write entire JSON object to file."""
+        try:
+            with open(self.filename, "w", encoding="utf-8") as file:
+                json.dump(data, file, indent=2)
+        except Exception as e:
+            warning_message = f"Error writing data: {str(e)}"
+            if self.showMessage:
+                self.showMessage("Write Error", warning_message, "w")
+            return False
+        return True
+
+    def write_url_path(self, url, path):
+        """Update only the URL in the JSON file."""
+        try:
+            data = self._read_data()
+            data["url"] = url
+            data["path"] = path
+            return self._write_data(data)
+        except Exception as e:
+            warning_message = f"Error writing: {str(e)}"
+            if self.showMessage:
+                self.showMessage("Save Error", warning_message, "w")
+            return False
+
+    def read_url(self):
+        """Get the URL value from the JSON file."""
+        try:
+            data = self._read_data()
+            return data.get("url", "")
         except Exception as e:
             warning_message = f"Error reading URL: {str(e)}"
             if self.showMessage:
@@ -77,13 +83,10 @@ class DataWriter:
             return ""
 
     def read_path(self):
-        """Reads the second line (Path) from the file."""
+        """Get the path value from the JSON file."""
         try:
-            with open(self.filename, "r", encoding="utf-8") as file:
-                lines = file.readlines()
-                return lines[1].strip() if len(lines) > 1 else ""
-        except FileNotFoundError:
-            return ""
+            data = self._read_data()
+            return data.get("path", "")
         except Exception as e:
             warning_message = f"Error reading path: {str(e)}"
             if self.showMessage:

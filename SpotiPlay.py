@@ -1,12 +1,14 @@
 from customtkinter import CTk, set_appearance_mode
 from concurrent.futures import ThreadPoolExecutor
-from modules.settings import WINDOW_FG, WINDOW_LOGO
+from modules.settings import WINDOW_FG, WINDOW_LOGO, COLLAPSE_ICON, EXTEND_ICON
 
 
 class App(CTk):
     def __init__(self):
         # Setup
         super().__init__(fg_color=WINDOW_FG)
+
+        self.isExtended = False
 
         # Initialize basic UI first
         self.setup_basic_ui()
@@ -33,15 +35,14 @@ class App(CTk):
         # Layout
         titleBar(self).pack(side="top", fill="x", pady=(4, 2), padx=4)
 
-        self.inputFields = inputFields(
-            self, onCheckURL=self.onCheckURL, onCheckPATH=self.onCheckPATH
-        )
+        self.inputFields = inputFields(self, onSaveClick=self.onSaveClick)
         self.inputFields.pack(side="top", fill="x")
 
         self.controls = controlField(
             self,
             retryMethod=self.onRetryClick,
             downloadMethod=self.onDownloadClick,
+            resizeWindowMethod=self.onResizeWindowClick,
         )
         self.controls.pack(side="bottom", fill="x")
 
@@ -78,25 +79,28 @@ class App(CTk):
         try:
             url = self.dataWriter.read_url()
             path = self.dataWriter.read_path()
+
+            if url == "" or path == "":
+                return
+
             self.inputFields.input1.getUrlInput().insert(0, url)
             self.inputFields.input2.getPathInput().insert(0, path)
         except Exception as e:
             warning_message = f"Failed to fill saved data: {str(e)}"
             self.showMessage("Data Loading Error", warning_message, "w")
 
-    def onCheckURL(self):
-        if self.inputFields.check_var_url.get():
-            # write the url to the file
-            url = self.inputFields.input1.getUrlInput().get()
-            future = self.executor.submit(self.dataWriter.write_url, url)
-            self.futures.append(future)
+    def onSaveClick(self):
+        # write the url to the file
+        url = self.inputFields.input1.getUrlInput().get()
+        path = self.inputFields.input2.getPathInput().get()
 
-    def onCheckPATH(self):
-        if self.inputFields.check_var_path.get():
-            # write the path to the file
-            path = self.inputFields.input2.getPathInput().get()
-            future = self.executor.submit(self.dataWriter.write_path, path)
-            self.futures.append(future)
+        if url == "" or path == "":
+            warning_message = "Please enter a valid URL and path."
+            self.showMessage("Save Error", warning_message, "w")
+            return
+
+        future = self.executor.submit(self.dataWriter.write_url_path, url, path)
+        self.futures.append(future)
 
     def onRetryClick(self, event):
         try:
@@ -157,6 +161,24 @@ class App(CTk):
             error_message = f"Failed to start download: {str(e)}"
             self.showMessage("Download Error", error_message, "e")
 
+    def onResizeWindowClick(self):
+        if self.isExtended:
+            self.geometry("600x200")
+            self.minsize(600, 200)
+            self.maxsize(600, 200)
+
+            self.isExtended = False
+
+            self.controls.resizeWindowBtn.changeImage(EXTEND_ICON)
+        else:
+            self.geometry("600x400")
+            self.minsize(600, 400)
+            self.maxsize(600, 400)
+
+            self.isExtended = True
+
+            self.controls.resizeWindowBtn.changeImage(COLLAPSE_ICON)
+
     def isSpotifyLink(self, url: str) -> bool:
         # Returns True if the given URL is a Spotify link, otherwise returns False for YouTube links.
         youtube_patterns = [
@@ -194,21 +216,6 @@ class App(CTk):
 
         # Check again after 3 second
         self.after(3000, self.checkStatus)
-
-    # def getPaths(self):
-    #     try:
-    #         import os
-    #         import sys
-
-    #         if getattr(sys, "frozen", False):  # If running as a packaged .exe
-    #             CURRENT_DIR = sys._MEIPASS
-    #         else:  # If running as a script
-    #             CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-
-    #         self.FFMPEG_PATH = os.path.join(CURRENT_DIR, "ffmpeg.exe")
-    #     except Exception as e:
-    #         error_message = f"Failed to get paths: {str(e)}"
-    #         self.showMessage("Path Error", error_message, "e")
 
     def showMessage(self, title, message, type="error"):
         from tkinter import messagebox

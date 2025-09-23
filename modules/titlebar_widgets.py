@@ -1,6 +1,7 @@
 from customtkinter import CTkFrame, CTkLabel, CTkImage
 from .settings import *
 from PIL import Image
+import webbrowser
 
 
 class titleBar(CTkFrame):
@@ -9,7 +10,12 @@ class titleBar(CTkFrame):
 
         title(self).pack(side="left", pady=0)
 
-        logo(self).pack(side="right", padx=7)
+        self.logo = logo(self)
+        self.logo.pack(side="right", padx=7)
+        self.logo.bind(
+            "<Button-1>",
+            lambda e: webbrowser.open("https://www.spotify.com/", new=2),
+        )
 
 
 class title(CTkFrame):
@@ -31,4 +37,4 @@ class title(CTkFrame):
 class logo(CTkLabel):
     def __init__(self, parent):
         logo_image = CTkImage(light_image=Image.open(UI_LOGO), size=(35, 35))
-        super().__init__(parent, image=logo_image, text="")
+        super().__init__(parent, image=logo_image, text="", cursor="hand2")
