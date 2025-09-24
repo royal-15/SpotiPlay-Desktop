@@ -90,8 +90,8 @@ class input2(CTkFrame):
             hover_color=GREEN_BTN_FG_HOVER,
             text_color="white",
             font=BUTTON_FONT,
-            width=70,
-            height=30,
+            width=60,
+            height=28,
             corner_radius=6,
             command=onSaveClick,
         )
@@ -105,5 +105,9 @@ class input2(CTkFrame):
 
     def onFolderSelectClick(self):
         path = filedialog.askdirectory()
+
+        if path == "":
+            return
+
         self.pathInput.delete(0, "end")
         self.pathInput.insert(0, path)

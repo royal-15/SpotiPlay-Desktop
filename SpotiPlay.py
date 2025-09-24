@@ -27,7 +27,7 @@ class App(CTk):
         self.minsize(600, 200)
         self.maxsize(600, 200)
 
-        # Import UI components only when needed
+        # Import UI components
         from modules.titlebar_widgets import titleBar
         from modules.inputField_widgets import inputFields
         from modules.controlField_widgets import controlField

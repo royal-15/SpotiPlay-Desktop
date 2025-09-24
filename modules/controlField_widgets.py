@@ -14,7 +14,7 @@ class controlField(CTkFrame):
         # ResizeWindow Button
         img = Image.open(EXTEND_ICON)
         img = img.convert("RGBA")
-        ctk_img = CTkImage(light_image=img, dark_image=img, size=(17, 13))
+        ctk_img = CTkImage(light_image=img, dark_image=img, size=(18, 13))
         self.resizeWindowBtn = resizeWindowButton(self, ctk_img, resizeWindowMethod)
         self.resizeWindowBtn.place(relx=0.5, rely=0.5, anchor="center")
 
@@ -64,14 +64,18 @@ class resizeWindowButton(CTkButton):
             parent,
             text="",
             image=ctk_img,
-            width=17,
+            width=18,
             height=13,
             cursor="hand2",
             command=resizeWindowMethod,
+            corner_radius=15,
+            fg_color="transparent",
+            bg_color=RESIZE_BTN_FG,
+            hover_color=RESIZE_BTN_FG_HOVER,
         )
 
     def changeImage(self, imgPath):
         img = Image.open(imgPath)
         img = img.convert("RGBA")
-        ctk_img = CTkImage(light_image=img, dark_image=img, size=(17, 13))
+        ctk_img = CTkImage(light_image=img, dark_image=img, size=(18, 13))
         self.configure(image=ctk_img)
