@@ -10,6 +10,10 @@ class App(CTk):
 
         self.isExtended = False
 
+        # Progress tracking state
+        self.total_tasks = 0
+        self.completed_tasks = 0
+
         # Initialize basic UI first
         self.setup_basic_ui()
 
@@ -52,7 +56,6 @@ class App(CTk):
     def setup_remaining_components(self):
         """Setup remaining components after UI is visible"""
         # Create executor and initialize objects
-        self.futures = []
         self.executor = ThreadPoolExecutor(max_workers=5)
 
         # Import modules only when needed
@@ -63,12 +66,18 @@ class App(CTk):
         # Get paths
         # self.getPaths()
 
-        self.dataWriter = DataWriter()
-        self.spotify = Spotify(self.executor, self.showMessage)
+        self.dataWriter = DataWriter(showMessage=self.showMessage)
+        self.spotify = Spotify(
+            self.executor,
+            self.showMessage,
+            on_tasks_started=self.on_tasks_started,
+            on_task_completed=self.on_task_completed,
+        )
         self.youtube = Youtube(
             self.executor,
-            futures=self.futures,
             showMessage=self.showMessage,
+            on_tasks_started=self.on_tasks_started,
+            on_task_completed=self.on_task_completed,
         )
 
         # Fill saved data
@@ -99,26 +108,23 @@ class App(CTk):
             self.showMessage("Save Error", warning_message, "w")
             return
 
-        future = self.executor.submit(self.dataWriter.write_url_path, url, path)
-        self.futures.append(future)
+        # Save synchronously; this is fast and keeps logic simple
+        self.dataWriter.write_url_path(url, path)
 
     def onRetryClick(self, event):
         try:
             if self.controls.downloadBtn.cget("state") == "disabled":
                 return
 
-            # ui updates
-            self.controls.status.configure(text="🔄 Retrying downloads, Please Wait!!")
+            # reset progress and update UI
+            self.reset_progress()
+            self.controls.status.configure(text="🔄 Retrying downloads, please wait...")
             self.controls.downloadBtn.configure(state="disabled")
             self.controls.status.update_idletasks()
             self.controls.downloadBtn.update_idletasks()
 
             path = self.inputFields.input2.getPathInput().get()
-            future = self.executor.submit(self.spotify.retryDownloads, path)
-            self.futures.append(future)
-
-            # ui updates
-            future.add_done_callback(self.checkStatus)
+            self.executor.submit(self.spotify.retryDownloads, path)
         except Exception as e:
             warning_message = f"Failed to retry downloads: {str(e)}"
             self.showMessage("Retry Error", warning_message, "w")
@@ -136,27 +142,21 @@ class App(CTk):
 
             print(f"🔄 Downloading... '{url}'")
 
-            # Check if the URL is a Spotify link
-            if self.isSpotifyLink(url):
-
-                # self.showMessage("Debug", "It's a Spotify link", "i")
-
-                future = self.executor.submit(self.spotify.download, url, path)
-                self.futures.append(future)
-            else:  # It's a YouTube link
-
-                # self.showMessage("Debug", "It's a YouTube link", "i")
-
-                future = self.executor.submit(self.youtube.download, url, path)
-                self.futures.append(future)
-
-            self.inputFields.input1.getUrlInput().delete(0, "end")
-
-            # ui update
-            self.controls.status.configure(text="🔄 Downloading...")
+            # reset progress and UI state
+            self.reset_progress()
+            self.controls.downloadBtn.configure(state="disabled")
+            self.controls.status.configure(text="🔄 Starting downloads...")
             self.controls.status.update_idletasks()
 
-            self.after(3000, self.checkStatus)
+            # Check if the URL is a Spotify link
+            if self.isSpotifyLink(url):
+                # self.showMessage("Debug", "It's a Spotify link", "i")
+                self.executor.submit(self.spotify.download, url, path)
+            else:  # It's a YouTube link
+                # self.showMessage("Debug", "It's a YouTube link", "i")
+                self.executor.submit(self.youtube.download, url, path)
+
+            self.inputFields.input1.getUrlInput().delete(0, "end")
         except Exception as e:
             error_message = f"Failed to start download: {str(e)}"
             self.showMessage("Download Error", error_message, "e")
@@ -204,18 +204,67 @@ class App(CTk):
             self.destroy()
             print("🔴 Application closed.")
 
-    def checkStatus(self, future=None):
-        # Check if any threads are running & update label accordingly
-        active_threads = len(self.executor._threads)
+    def reset_progress(self):
+        """Reset progress counters and progress bar."""
+        self.total_tasks = 0
+        self.completed_tasks = 0
+        if hasattr(self.controls, "progressBar"):
+            self.controls.progressBar.set(0)
+        # Restore default status text
+        self.controls.status.configure(text="@royal-15 Officials")
+        # Ensure Download button is enabled by default
+        self.controls.downloadBtn.configure(state="normal")
 
-        if active_threads == 0 or all(f.done() for f in self.futures):
+    def _update_progress_ui(self):
+        """Update status label and progress bar based on current counters."""
+        if self.total_tasks <= 0:
+            return
+
+        progress = self.completed_tasks / self.total_tasks
+        progress = max(0.0, min(1.0, progress))
+
+        if hasattr(self.controls, "progressBar"):
+            self.controls.progressBar.set(progress)
+
+        if self.completed_tasks >= self.total_tasks:
             self.controls.status.configure(text="✅ All Done")
             self.controls.downloadBtn.configure(state="normal")
         else:
-            self.controls.status.configure(text=f"🔄 Downloading...")
+            self.controls.status.configure(
+                text=f"🔄 Downloading {self.completed_tasks} / {self.total_tasks}..."
+            )
 
-        # Check again after 3 second
-        self.after(3000, self.checkStatus)
+    def _notify_tasks_started_main_thread(self, count):
+        if count <= 0:
+            return
+
+        # First task of a new batch
+        if self.total_tasks == 0 and self.completed_tasks == 0:
+            if hasattr(self.controls, "progressBar"):
+                self.controls.progressBar.set(0)
+            self.controls.status.configure(
+                text=f"🔄 Downloading 0 / {count}..."
+            )
+
+        self.total_tasks += count
+        # Keep download button disabled while tasks are running
+        self.controls.downloadBtn.configure(state="disabled")
+        self._update_progress_ui()
+
+    def _notify_task_completed_main_thread(self):
+        if self.total_tasks <= 0:
+            return
+
+        self.completed_tasks += 1
+        self._update_progress_ui()
+
+    def on_tasks_started(self, count: int):
+        """Thread-safe callback for workers to report batch start."""
+        self.after(0, self._notify_tasks_started_main_thread, count)
+
+    def on_task_completed(self):
+        """Thread-safe callback for workers to report task completion."""
+        self.after(0, self._notify_task_completed_main_thread)
 
     def showMessage(self, title, message, type="error"):
         from tkinter import messagebox
@@ -223,12 +272,11 @@ class App(CTk):
         if type == "i":
             print(f"ℹ️ INFO - {title}: {message}")
             messagebox.showinfo(title, message)
-
-        if type == "w":
+        elif type == "w":
             print(f"⚠️ WARNING - {title}: {message}")
             messagebox.showwarning(title, message)
-
-        if type == "er":
+        else:
+            # Treat any other value (including "e" or "error") as an error
             print(f"❌ ERROR - {title}: {message}")
             messagebox.showerror(title, message)
 

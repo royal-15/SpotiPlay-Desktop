@@ -1,0 +1,245 @@
+"""Download manager for coordinating multiple download tasks."""
+from typing import Dict, List, Optional
+from PySide6.QtCore import QObject, Signal
+
+from ..config.settings import AppSettings
+from ..config.constants import STATUS_QUEUED, STATUS_DOWNLOADING, STATUS_COMPLETED, STATUS_FAILED, STATUS_CANCELLED
+from ..utils.logger import logger
+from .download_worker import DownloadWorker, DownloadTask
+
+
+class DownloadManager(QObject):
+    """Manages download queue and coordinates worker threads."""
+    
+    # Signals
+    task_added = Signal(DownloadTask)
+    task_updated = Signal(DownloadTask)
+    task_completed = Signal(DownloadTask)
+    task_failed = Signal(DownloadTask)
+    queue_changed = Signal()
+    
+    def __init__(self, settings: AppSettings, parent=None):
+        super().__init__(parent)
+        self.settings = settings
+        self._tasks: Dict[int, DownloadTask] = {}
+        self._workers: Dict[int, DownloadWorker] = {}
+        self._next_task_id = 1
+    
+    def add_task(self, url: str) -> DownloadTask:
+        """Add a new download task to the queue."""
+        task = DownloadTask(
+            id=self._next_task_id,
+            url=url,
+            status=STATUS_QUEUED
+        )
+        self._next_task_id += 1
+        
+        self._tasks[task.id] = task
+        logger.info(f"Added task {task.id}: {url}")
+        
+        self.task_added.emit(task)
+        self.queue_changed.emit()
+        
+        # Try to start the task immediately if slots are available
+        self._try_start_next_task()
+        
+        return task
+    
+    def add_tasks(self, urls: List[str]) -> List[DownloadTask]:
+        """Add multiple download tasks."""
+        tasks = []
+        for url in urls:
+            task = self.add_task(url)
+            tasks.append(task)
+        return tasks
+    
+    def cancel_task(self, task_id: int) -> bool:
+        """Cancel a specific task."""
+        if task_id in self._workers:
+            worker = self._workers[task_id]
+            worker.cancel()
+            return True
+        elif task_id in self._tasks:
+            # Task is queued but not started yet
+            task = self._tasks[task_id]
+            task.status = STATUS_CANCELLED
+            self.task_updated.emit(task)
+            self.queue_changed.emit()
+            return True
+        return False
+    
+    def cancel_all(self) -> None:
+        """Cancel all active and queued tasks."""
+        logger.info("Cancelling all tasks")
+        
+        # Cancel running workers
+        for worker in list(self._workers.values()):
+            worker.cancel()
+        
+        # Update queued tasks
+        for task in self._tasks.values():
+            if task.status == STATUS_QUEUED:
+                task.status = STATUS_CANCELLED
+                self.task_updated.emit(task)
+        
+        self.queue_changed.emit()
+    
+    def clear_completed(self) -> None:
+        """Remove completed tasks from the queue."""
+        to_remove = [
+            task_id for task_id, task in self._tasks.items()
+            if task.status == STATUS_COMPLETED
+        ]
+        for task_id in to_remove:
+            del self._tasks[task_id]
+        
+        if to_remove:
+            logger.info(f"Cleared {len(to_remove)} completed tasks")
+            self.queue_changed.emit()
+    
+    def clear_failed(self) -> None:
+        """Remove failed tasks from the queue."""
+        to_remove = [
+            task_id for task_id, task in self._tasks.items()
+            if task.status == STATUS_FAILED
+        ]
+        for task_id in to_remove:
+            del self._tasks[task_id]
+        
+        if to_remove:
+            logger.info(f"Cleared {len(to_remove)} failed tasks")
+            self.queue_changed.emit()
+    
+    def clear_all(self) -> None:
+        """Clear all tasks from the queue."""
+        self.cancel_all()
+        self._tasks.clear()
+        logger.info("Cleared all tasks")
+        self.queue_changed.emit()
+    
+    def get_task(self, task_id: int) -> Optional[DownloadTask]:
+        """Get a task by ID."""
+        return self._tasks.get(task_id)
+    
+    def get_all_tasks(self) -> List[DownloadTask]:
+        """Get all tasks."""
+        return list(self._tasks.values())
+    
+    def get_stats(self) -> Dict[str, int]:
+        """Get download statistics."""
+        stats = {
+            'total': len(self._tasks),
+            'queued': 0,
+            'downloading': 0,
+            'completed': 0,
+            'failed': 0,
+            'cancelled': 0,
+        }
+        
+        for task in self._tasks.values():
+            if task.status == STATUS_QUEUED:
+                stats['queued'] += 1
+            elif task.status == STATUS_DOWNLOADING:
+                stats['downloading'] += 1
+            elif task.status == STATUS_COMPLETED:
+                stats['completed'] += 1
+            elif task.status == STATUS_FAILED:
+                stats['failed'] += 1
+            elif task.status == STATUS_CANCELLED:
+                stats['cancelled'] += 1
+        
+        return stats
+    
+    def _try_start_next_task(self) -> None:
+        """Try to start the next queued task if slots are available."""
+        running_count = len(self._workers)
+        max_parallel = self.settings.max_parallel_downloads
+        
+        if running_count >= max_parallel:
+            return
+        
+        # Find next queued task
+        for task in self._tasks.values():
+            if task.status == STATUS_QUEUED:
+                self._start_task(task)
+                break
+    
+    def _start_task(self, task: DownloadTask) -> None:
+        """Start downloading a task."""
+        if task.id in self._workers:
+            return
+        
+        logger.info(f"Starting task {task.id}")
+        task.status = STATUS_DOWNLOADING
+        task.progress = 0
+        
+        # Create worker
+        worker = DownloadWorker(task, self.settings, self)
+        self._workers[task.id] = worker
+        
+        # Connect signals
+        worker.progress_updated.connect(
+            lambda progress, speed, eta, t=task: self._on_task_progress(t, progress, speed, eta)
+        )
+        worker.finished.connect(
+            lambda status, output, error, t=task: self._on_task_finished(t, status, output, error)
+        )
+        
+        # Start worker
+        worker.start()
+        
+        self.task_updated.emit(task)
+        self.queue_changed.emit()
+    
+    def _on_task_progress(self, task: DownloadTask, progress: int, speed: str, eta: str) -> None:
+        """Handle progress update from worker."""
+        task.progress = progress
+        task.speed = speed
+        task.eta = eta
+        self.task_updated.emit(task)
+    
+    def _on_task_finished(self, task: DownloadTask, status: str, output_file: str, error_message: str) -> None:
+        """Handle task completion."""
+        # Clean up worker
+        worker = self._workers.pop(task.id, None)
+        if worker:
+            worker.deleteLater()
+        
+        # Update task
+        task.status = status
+        task.output_file = output_file if output_file else None
+        task.error_message = error_message if error_message else None
+        
+        if status == STATUS_COMPLETED:
+            task.progress = 100
+            logger.info(f"Task {task.id} completed: {output_file}")
+            self.task_completed.emit(task)
+        elif status == STATUS_FAILED:
+            logger.error(f"Task {task.id} failed: {error_message}")
+            self.task_failed.emit(task)
+        
+        self.task_updated.emit(task)
+        self.queue_changed.emit()
+        
+        # Try to start next task
+        self._try_start_next_task()
+    
+    def start_all_queued(self) -> None:
+        """Start all queued tasks (respecting parallel limit)."""
+        logger.info("Starting all queued tasks")
+        while True:
+            running_count = len(self._workers)
+            if running_count >= self.settings.max_parallel_downloads:
+                break
+            
+            # Find next queued task
+            next_task = None
+            for task in self._tasks.values():
+                if task.status == STATUS_QUEUED:
+                    next_task = task
+                    break
+            
+            if next_task:
+                self._start_task(next_task)
+            else:
+                break

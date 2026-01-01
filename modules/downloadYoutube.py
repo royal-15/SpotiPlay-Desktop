@@ -2,10 +2,17 @@ import yt_dlp
 
 
 class Youtube:
-    def __init__(self, executor, futures, showMessage):
+    def __init__(
+        self,
+        executor,
+        showMessage,
+        on_tasks_started=None,
+        on_task_completed=None,
+    ):
         self.executor = executor
-        self.futures = futures
         self.showMessage = showMessage
+        self.on_tasks_started = on_tasks_started
+        self.on_task_completed = on_task_completed
 
     # playlist check
     def isPlaylist(self, url):
@@ -36,8 +43,10 @@ class Youtube:
             if self.isPlaylist(url):
                 self.downloadPlaylist(url, output_folder)
             else:
-                future = self.executor.submit(self.downloadSong, url, output_folder)
-                self.futures.append(future)
+                # Single video => one task
+                if self.on_tasks_started:
+                    self.on_tasks_started(1)
+                self.executor.submit(self._downloadSong_with_progress, url, output_folder)
         except Exception as e:
             error_message = f"Failed to start download: {url}\nError: {str(e)}"
             self.showMessage("Download Error", error_message, "e")
@@ -57,13 +66,25 @@ class Youtube:
 
             video_urls = [entry["url"] for entry in info["entries"] if "url" in entry]
 
+            # Notify UI of total number of items in playlist
+            if self.on_tasks_started and video_urls:
+                self.on_tasks_started(len(video_urls))
+
             for url in video_urls:
-                self.executor.submit(self.downloadSong, url, output_folder)
+                self.executor.submit(self._downloadSong_with_progress, url, output_folder)
         except Exception as e:
             warning_message = (
                 f"Failed to process playlist: {playlist_url}\nError: {str(e)}"
             )
             self.showMessage("Playlist Download Error", warning_message, "w")
+
+    def _downloadSong_with_progress(self, Song_url, output_folder):
+        """Wrapper around downloadSong that also updates task progress."""
+        try:
+            self.downloadSong(Song_url, output_folder)
+        finally:
+            if self.on_task_completed:
+                self.on_task_completed()
 
     # download song
     def downloadSong(self, Song_url, output_folder):

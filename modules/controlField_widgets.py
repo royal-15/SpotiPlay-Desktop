@@ -1,4 +1,4 @@
-from customtkinter import CTkFrame, CTkLabel, CTkImage, CTkButton
+from customtkinter import CTkFrame, CTkLabel, CTkImage, CTkButton, CTkProgressBar
 from .settings import *
 from PIL import Image
 
@@ -10,6 +10,11 @@ class controlField(CTkFrame):
         # Status Label
         self.status = statusLabel(self)
         self.status.pack(side="left", padx=(15, 0))
+
+        # Progress Bar
+        self.progressBar = CTkProgressBar(self, width=180)
+        self.progressBar.pack(side="left", padx=(10, 0), pady=(0, 2))
+        self.progressBar.set(0)
 
         # ResizeWindow Button
         img = Image.open(EXTEND_ICON)
