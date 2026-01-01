@@ -1,5 +1,5 @@
 {
-  "output_dir": "C:/Users/Rajat/Downloads/Songs/temp",
+  "output_dir": "C:/Users/Rajat/Downloads/Songs",
   "theme": "dark",
   "default_quality": "320kbps",
   "default_format": "mp3",
@@ -11,7 +11,7 @@
   "ffmpeg_path": "ffmpeg",
   "window_width": 1000,
   "window_height": 700,
-  "window_maximized": true,
+  "window_maximized": false,
   "use_proxy": false,
   "proxy_url": "",
   "embed_metadata": true,
