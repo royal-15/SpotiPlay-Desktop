@@ -21,6 +21,12 @@ class AppSettings:
     # General settings
     output_dir: str = field(default=DEFAULT_OUTPUT_DIR)
     theme: str = field(default=DEFAULT_THEME)
+
+    # Playlist folder mappings: playlist name -> folder path
+    playlist_folders: dict[str, str] = field(default_factory=dict)
+
+    # Optional playlist URL mappings: playlist name -> playlist URL
+    playlist_urls: dict[str, str] = field(default_factory=dict)
     
     # Download settings
     default_quality: str = field(default=DEFAULT_QUALITY)

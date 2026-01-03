@@ -8,7 +8,8 @@ from PySide6.QtWidgets import (
     QLineEdit, QPushButton, QComboBox, QLabel,
     QTableWidget, QTableWidgetItem, QProgressBar,
     QFileDialog, QHeaderView, QMessageBox, QSpinBox,
-    QDialog, QFormLayout, QDialogButtonBox
+    QDialog, QFormLayout, QDialogButtonBox, QInputDialog,
+    QListWidget, QListWidgetItem, QToolButton, QMenu
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QIcon, QCloseEvent
@@ -143,56 +144,93 @@ class MainWindow(QMainWindow):
         self.queue_table.setAlternatingRowColors(True)
         main_layout.addWidget(self.queue_table, 1)
         
-        # Bottom controls
-        bottom_layout = QHBoxLayout()
-        bottom_layout.setSpacing(8)
-        
-        # Output directory
+        # Bottom controls (two rows: output, playlists + queue actions)
+        bottom_container = QVBoxLayout()
+        bottom_container.setSpacing(4)
+
+        # Row 1: Output directory
+        output_layout = QHBoxLayout()
+        output_layout.setSpacing(8)
+
         dir_label = QLabel("Output:")
-        bottom_layout.addWidget(dir_label)
-        
+        output_layout.addWidget(dir_label)
+
         self.output_dir_input = QLineEdit()
         self.output_dir_input.setText(self.settings.output_dir)
-        bottom_layout.addWidget(self.output_dir_input, 2)
-        
+        output_layout.addWidget(self.output_dir_input, 2)
+
         self.browse_button = QPushButton("Browse...")
         self.browse_button.setObjectName("secondaryButton")
         self.browse_button.clicked.connect(self._on_browse_clicked)
-        bottom_layout.addWidget(self.browse_button)
-        
-        bottom_layout.addStretch()
-        
-        # Control buttons
+        output_layout.addWidget(self.browse_button)
+
+        bottom_container.addLayout(output_layout)
+
+        # Row 2: Playlist controls on the left, actions on the right
+        bottom_row_layout = QHBoxLayout()
+        bottom_row_layout.setSpacing(8)
+
+        # Left section: playlist controls
+        playlist_label = QLabel("Playlists:")
+        bottom_row_layout.addWidget(playlist_label)
+
+        # Saved playlist folders
+        self.playlist_combo = QComboBox()
+        self._refresh_playlist_folders()
+        self.playlist_combo.currentIndexChanged.connect(self._on_playlist_selected)
+        bottom_row_layout.addWidget(self.playlist_combo)
+
+        self.save_playlist_button = QPushButton("Save Playlist Folder")
+        self.save_playlist_button.setObjectName("secondaryButton")
+        self.save_playlist_button.clicked.connect(self._on_save_playlist_folder_clicked)
+        bottom_row_layout.addWidget(self.save_playlist_button)
+
+        self.manage_playlists_button = QPushButton("Manage...")
+        self.manage_playlists_button.setObjectName("secondaryButton")
+        self.manage_playlists_button.clicked.connect(self._on_manage_playlist_folders_clicked)
+        bottom_row_layout.addWidget(self.manage_playlists_button)
+
+        bottom_row_layout.addStretch()
+
+        # Right section: queue controls
         self.start_all_button = QPushButton("Start All")
         self.start_all_button.clicked.connect(self._on_start_all_clicked)
-        bottom_layout.addWidget(self.start_all_button)
-        
+        bottom_row_layout.addWidget(self.start_all_button)
+
         self.cancel_all_button = QPushButton("Cancel All")
         self.cancel_all_button.setObjectName("secondaryButton")
         self.cancel_all_button.clicked.connect(self._on_cancel_all_clicked)
-        bottom_layout.addWidget(self.cancel_all_button)
-        
-        self.clear_completed_button = QPushButton("Clear Completed")
-        self.clear_completed_button.setObjectName("secondaryButton")
-        self.clear_completed_button.clicked.connect(self._on_clear_completed_clicked)
-        bottom_layout.addWidget(self.clear_completed_button)
-        
-        self.clear_failed_button = QPushButton("Clear Failed")
-        self.clear_failed_button.setObjectName("secondaryButton")
-        self.clear_failed_button.clicked.connect(self._on_clear_failed_clicked)
-        bottom_layout.addWidget(self.clear_failed_button)
-        
-        self.clear_all_button = QPushButton("Clear All")
-        self.clear_all_button.setObjectName("dangerButton")
-        self.clear_all_button.clicked.connect(self._on_clear_all_clicked)
-        bottom_layout.addWidget(self.clear_all_button)
-        
+        bottom_row_layout.addWidget(self.cancel_all_button)
+
+        # Clear menu (Completed / Failed / All)
+        self.clear_menu_button = QToolButton()
+        self.clear_menu_button.setText("Clear ▾")
+        self.clear_menu_button.setObjectName("secondaryButton")
+        clear_menu = QMenu(self.clear_menu_button)
+
+        clear_completed_action = clear_menu.addAction("Clear Completed")
+        clear_completed_action.triggered.connect(self._on_clear_completed_clicked)
+
+        clear_failed_action = clear_menu.addAction("Clear Failed")
+        clear_failed_action.triggered.connect(self._on_clear_failed_clicked)
+
+        clear_menu.addSeparator()
+
+        clear_all_action = clear_menu.addAction("Clear All")
+        clear_all_action.triggered.connect(self._on_clear_all_clicked)
+
+        self.clear_menu_button.setMenu(clear_menu)
+        self.clear_menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        bottom_row_layout.addWidget(self.clear_menu_button)
+
         self.settings_button = QPushButton("⚙ Settings")
         self.settings_button.setObjectName("secondaryButton")
         self.settings_button.clicked.connect(self._on_settings_clicked)
-        bottom_layout.addWidget(self.settings_button)
-        
-        main_layout.addLayout(bottom_layout)
+        bottom_row_layout.addWidget(self.settings_button)
+
+        bottom_container.addLayout(bottom_row_layout)
+
+        main_layout.addLayout(bottom_container)
         
         # Status bar
         self.statusBar().showMessage("Ready")
@@ -320,7 +358,117 @@ class MainWindow(QMainWindow):
             self.output_dir_input.setText(directory)
             self.settings.output_dir = directory
             self.settings_manager.save()
-    
+
+    def _refresh_playlist_folders(self) -> None:
+        """Populate saved playlist folders combo box."""
+        # This may be called before the combo is created during initialization
+        if not hasattr(self, "playlist_combo"):
+            return
+
+        self.playlist_combo.blockSignals(True)
+        self.playlist_combo.clear()
+        self.playlist_combo.addItem("Saved playlists...")
+
+        playlist_folders = getattr(self.settings, "playlist_folders", {}) or {}
+        for name in sorted(playlist_folders.keys()):
+            self.playlist_combo.addItem(name)
+
+        self.playlist_combo.blockSignals(False)
+
+    def _on_playlist_selected(self, index: int) -> None:
+        """Apply selected saved playlist folder and URL to the interface."""
+        if index <= 0:
+            # Placeholder item selected
+            return
+
+        name = self.playlist_combo.currentText()
+        folder = self.settings.playlist_folders.get(name) if hasattr(self.settings, "playlist_folders") else None
+        if not folder:
+            return
+
+        # Set the output directory
+        self.output_dir_input.setText(folder)
+        self.settings.output_dir = folder
+        self.settings_manager.save()
+        
+        # Also populate the URL input if available
+        url = self.settings.playlist_urls.get(name) if hasattr(self.settings, "playlist_urls") else None
+        if url:
+            self.url_input.setText(url)
+            Toast.show_message(self, f"Loaded playlist '{name}' - Click 'Add to Queue' to download", "info", 3000)
+        else:
+            Toast.show_message(self, f"Output folder set for '{name}'", "info", 2000)
+
+    def _on_save_playlist_folder_clicked(self) -> None:
+        """Save the current output directory under a playlist name."""
+        directory = self.output_dir_input.text().strip()
+        if not directory:
+            Toast.show_message(self, "Please select an output directory first", "warning", 3000)
+            return
+
+        is_valid, error_message = is_valid_directory(directory)
+        if not is_valid:
+            Toast.show_message(self, error_message, "error", 3000)
+            return
+
+        name, ok = QInputDialog.getText(
+            self,
+            "Save Playlist Folder",
+            "Playlist name:",
+        )
+        if not ok:
+            return
+
+        name = name.strip()
+        if not name:
+            Toast.show_message(self, "Playlist name cannot be empty", "warning", 3000)
+            return
+
+        if not hasattr(self.settings, "playlist_folders") or self.settings.playlist_folders is None:
+            self.settings.playlist_folders = {}
+
+        # Optional playlist URL (prefill from current URL input if available)
+        default_url = self.url_input.text().strip()
+        url, ok_url = QInputDialog.getText(
+            self,
+            "Playlist URL (optional)",
+            "Playlist URL:",
+            text=default_url,
+        )
+        if not ok_url:
+            url = ""
+
+        self.settings.playlist_folders[name] = directory
+
+        if not hasattr(self.settings, "playlist_urls") or self.settings.playlist_urls is None:
+            self.settings.playlist_urls = {}
+        url = url.strip()
+        if url:
+            self.settings.playlist_urls[name] = url
+
+        self.settings_manager.save()
+        self._refresh_playlist_folders()
+
+        # Select the newly added playlist in the combo box
+        index = self.playlist_combo.findText(name)
+        if index != -1:
+            self.playlist_combo.setCurrentIndex(index)
+
+        Toast.show_message(self, f"Saved folder for playlist '{name}'", "success", 3000)
+
+    def _on_manage_playlist_folders_clicked(self) -> None:
+        """Open dialog to manage saved playlist-folder mappings."""
+        playlist_folders = getattr(self.settings, "playlist_folders", {}) or {}
+        playlist_urls = getattr(self.settings, "playlist_urls", {}) or {}
+        dialog = ManagePlaylistsDialog(playlist_folders, playlist_urls, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Update settings with modified mappings
+            self.settings.playlist_folders = dialog.get_playlist_folders()
+            self.settings.playlist_urls = dialog.get_playlist_urls()
+            self.settings_manager.save()
+            self._refresh_playlist_folders()
+            Toast.show_message(self, "Updated saved playlists", "success", 2000)
+        
     def _on_start_all_clicked(self) -> None:
         """Handle start all button click."""
         self.download_manager.start_all_queued()
@@ -533,3 +681,255 @@ class SettingsDialog(QDialog):
         self.settings.spotdl_path = self.spotdl_input.text().strip() or "spotdl"
         self.settings.ffmpeg_path = self.ffmpeg_input.text().strip() or "ffmpeg"
         super().accept()
+
+
+class ManagePlaylistsDialog(QDialog):
+    """Dialog to manage saved playlists in a table format."""
+
+    def __init__(
+        self,
+        playlist_folders: dict[str, str],
+        playlist_urls: dict[str, str] | None = None,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self._original_folders = playlist_folders
+        # Work on copies so Cancel can discard changes
+        self._folders: dict[str, str] = dict(playlist_folders)
+        self._urls: dict[str, str] = dict(playlist_urls or {})
+
+        self.setWindowTitle("Manage Saved Playlists")
+        self.setMinimumWidth(1000)
+        self.setMinimumHeight(600)
+
+        self._setup_ui()
+        self._populate_table()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+
+        # Table widget for playlists
+        self.table_widget = QTableWidget()
+        self.table_widget.setColumnCount(3)
+        self.table_widget.setHorizontalHeaderLabels(["Name", "Folder Path", "Playlist URL"])
+        self.table_widget.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        self.table_widget.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table_widget.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.table_widget.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table_widget.setAlternatingRowColors(True)
+        self.table_widget.itemChanged.connect(self._on_item_changed)
+        layout.addWidget(self.table_widget)
+
+        # Buttons row
+        button_row = QHBoxLayout()
+
+        self.add_button = QPushButton("Add Playlist")
+        self.add_button.clicked.connect(self._on_add_clicked)
+        button_row.addWidget(self.add_button)
+
+        self.browse_button = QPushButton("Browse Folder...")
+        self.browse_button.clicked.connect(self._on_browse_clicked)
+        button_row.addWidget(self.browse_button)
+
+        self.delete_button = QPushButton("Delete")
+        self.delete_button.setObjectName("dangerButton")
+        self.delete_button.clicked.connect(self._on_delete_clicked)
+        button_row.addWidget(self.delete_button)
+
+        button_row.addStretch()
+
+        layout.addLayout(button_row)
+
+        # Dialog buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _populate_table(self) -> None:
+        """Populate table with playlist data."""
+        self.table_widget.blockSignals(True)
+        self.table_widget.setRowCount(0)
+
+        for name in sorted(self._folders.keys()):
+            row = self.table_widget.rowCount()
+            self.table_widget.insertRow(row)
+
+            # Name column
+            name_item = QTableWidgetItem(name)
+            self.table_widget.setItem(row, 0, name_item)
+
+            # Folder path column
+            path = self._folders[name]
+            path_item = QTableWidgetItem(path)
+            self.table_widget.setItem(row, 1, path_item)
+
+            # URL column
+            url = self._urls.get(name, "")
+            url_item = QTableWidgetItem(url)
+            self.table_widget.setItem(row, 2, url_item)
+
+        self.table_widget.blockSignals(False)
+
+    def _on_item_changed(self, item: QTableWidgetItem) -> None:
+        """Handle inline editing of table items."""
+        row = item.row()
+        col = item.column()
+
+        # Get the original name (stored in column 0)
+        name_item = self.table_widget.item(row, 0)
+        if not name_item:
+            return
+
+        new_value = item.text().strip()
+
+        # Find the original name by searching through our data
+        sorted_names = sorted(self._folders.keys())
+        if row >= len(sorted_names):
+            return
+        old_name = sorted_names[row]
+
+        if col == 0:  # Name column
+            if not new_value:
+                QMessageBox.warning(self, "Invalid Name", "Playlist name cannot be empty.")
+                self._populate_table()
+                return
+
+            if new_value != old_name:
+                if new_value in self._folders:
+                    QMessageBox.warning(self, "Name Exists", "A playlist with this name already exists.")
+                    self._populate_table()
+                    return
+
+                # Rename the playlist
+                path = self._folders.pop(old_name)
+                self._folders[new_value] = path
+
+                if old_name in self._urls:
+                    url_value = self._urls.pop(old_name)
+                    self._urls[new_value] = url_value
+
+                self._populate_table()
+
+        elif col == 1:  # Folder path column
+            self._folders[old_name] = new_value
+
+        elif col == 2:  # URL column
+            if new_value:
+                self._urls[old_name] = new_value
+            else:
+                self._urls.pop(old_name, None)
+
+    def _on_add_clicked(self) -> None:
+        """Add a new playlist entry."""
+        name, ok = QInputDialog.getText(
+            self,
+            "Add Playlist",
+            "Playlist name:",
+        )
+        if not ok:
+            return
+
+        name = name.strip()
+        if not name:
+            QMessageBox.warning(self, "Invalid Name", "Playlist name cannot be empty.")
+            return
+
+        if name in self._folders:
+            QMessageBox.warning(self, "Name Exists", "A playlist with this name already exists.")
+            return
+
+        # Ask for folder path
+        folder_path, ok_path = QInputDialog.getText(
+            self,
+            "Add Playlist",
+            "Folder path:",
+        )
+        if not ok_path:
+            return
+
+        folder_path = folder_path.strip()
+        if not folder_path:
+            QMessageBox.warning(self, "Invalid Path", "Folder path cannot be empty.")
+            return
+
+        # Ask for URL (optional)
+        url, ok_url = QInputDialog.getText(
+            self,
+            "Add Playlist",
+            "Playlist URL (optional):",
+        )
+        if not ok_url:
+            url = ""
+
+        # Add to data
+        self._folders[name] = folder_path
+        url = url.strip()
+        if url:
+            self._urls[name] = url
+
+        self._populate_table()
+
+    def _on_browse_clicked(self) -> None:
+        """Browse for folder path for selected playlist."""
+        current_row = self.table_widget.currentRow()
+        if current_row < 0:
+            QMessageBox.information(self, "No Selection", "Please select a playlist row first.")
+            return
+
+        # Get current folder path from the selected row
+        path_item = self.table_widget.item(current_row, 1)
+        current_path = path_item.text() if path_item else ""
+
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Select Folder",
+            current_path
+        )
+
+        if directory:
+            # Update the table cell
+            path_item.setText(directory)
+
+            # Update the data
+            sorted_names = sorted(self._folders.keys())
+            if current_row < len(sorted_names):
+                name = sorted_names[current_row]
+                self._folders[name] = directory
+
+    def _on_delete_clicked(self) -> None:
+        """Delete selected playlist."""
+        current_row = self.table_widget.currentRow()
+        if current_row < 0:
+            QMessageBox.information(self, "No Selection", "Please select a playlist to delete.")
+            return
+
+        sorted_names = sorted(self._folders.keys())
+        if current_row >= len(sorted_names):
+            return
+
+        name = sorted_names[current_row]
+
+        reply = QMessageBox.question(
+            self,
+            "Delete Playlist",
+            f"Delete saved playlist '{name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self._folders.pop(name, None)
+        self._urls.pop(name, None)
+        self._populate_table()
+
+    def get_playlist_folders(self) -> dict[str, str]:
+        """Return the modified playlist-folder mapping."""
+        return dict(self._folders)
+
+    def get_playlist_urls(self) -> dict[str, str]:
+        """Return the modified playlist-URL mapping."""
+        return dict(self._urls)
